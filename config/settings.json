@@ -24,11 +24,7 @@
     "min_ocr_confidence": 25,
     "fuzzy_threshold": 0.84,
     "pyautogui_pause": 0.15,
-    "scroll_steps": -50,
-    "message_input_x": 620,
-    "message_input_y": 1047,
-    "before_manual_typing_wait_seconds": 2.0,
-    "manual_key_interval_seconds": 0.08
+    "scroll_steps": -50
   },
   "messaging": {
     "message": "Огонь"

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import time
-import ctypes
 from typing import Iterable
 
 import pyautogui
+import pyperclip
 
 from browser.chrome_app import ChromeTikTokApp
 from models.user import User
@@ -29,55 +29,10 @@ class TikTokClient:
         self.app.click_messages()
         self.app.prepare_messaging_view()
 
-    def _type_message_manually(self, text: str) -> None:
-        """Type the message using real keyboard key presses, without the clipboard."""
-        if text != "Огонь":
-            raise MessageSendError("Manual keyboard mode currently supports only the configured message 'Огонь'.")
-
-        # Russian keyboard layout mapping:
-        # О = Shift+J, г = U, о = J, н = Y, ь = M
-        user32 = ctypes.windll.user32
-        original_layout = user32.GetKeyboardLayout(0)
-        russian_layout = user32.LoadKeyboardLayoutW("00000419", 1)
-        if not russian_layout:
-            raise MessageSendError("Could not activate the Russian keyboard layout.")
-
-        try:
-            user32.ActivateKeyboardLayout(russian_layout, 0)
-            time.sleep(0.1)
-
-            keys = [("shift", "j"), (None, "u"), (None, "j"), (None, "y"), (None, "m")]
-            key_interval = float(self.settings.get("manual_key_interval_seconds", 0.08))
-            for modifier, key in keys:
-                if modifier:
-                    pyautogui.keyDown(modifier)
-                pyautogui.press(key)
-                if modifier:
-                    pyautogui.keyUp(modifier)
-                if key_interval > 0:
-                    time.sleep(key_interval)
-        finally:
-            if original_layout:
-                user32.ActivateKeyboardLayout(original_layout, 0)
-
-    def _send_message(self, message: str, username: str) -> None:
-        if not message.strip():
-            raise MessageSendError("Message is empty.")
-
-        input_x = int(self.settings.get("message_input_x", 620))
-        input_y = int(self.settings.get("message_input_y", 1047))
-        self.logger.info("Clicking message input at (%s,%s)", input_x, input_y)
-        self.app.click_screen_point(input_x, input_y, "message input")
-
-        wait_seconds = float(self.settings.get("before_manual_typing_wait_seconds", 2.0))
-        self.logger.info("Waiting %.2fs before manual keyboard input", wait_seconds)
-        time.sleep(wait_seconds)
-
-        self.logger.info("Typing message manually: %s", message)
-        self._type_message_manually(message)
-        pyautogui.press("enter")
-        time.sleep(float(self.settings.get("after_send_wait_seconds", 1.0)))
-        self.logger.info("Message submitted for @%s", username)
+    def _paste(self, text: str) -> None:
+        pyperclip.copy(text)
+        pyautogui.hotkey("ctrl", "a")
+        pyautogui.hotkey("ctrl", "v")
 
     def _click_match(self, match: OCRMatch) -> None:
         x, y = match.center
@@ -87,6 +42,17 @@ class TikTokClient:
         )
         pyautogui.click(x, y, duration=0.10)
         time.sleep(float(self.settings.get("after_nickname_click_wait_seconds", 1.0)))
+
+    def _send_message(self, message: str, username: str) -> None:
+        if not message.strip():
+            raise MessageSendError("Message is empty.")
+
+        # The chat pane should now be focused. Clicking the center-right/lower area
+        # is intentionally avoided; keyboard focus is kept on the chat opened by the nickname click.
+        self._paste(message)
+        pyautogui.press("enter")
+        time.sleep(float(self.settings.get("after_send_wait_seconds", 1.0)))
+        self.logger.info("Message sent to @%s", username)
 
     def send_sequence(self, users: Iterable[User], message: str) -> str:
         self.app.ensure_maximized()
