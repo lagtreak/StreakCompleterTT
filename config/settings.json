@@ -1,0 +1,36 @@
+{
+  "browser": {
+    "chrome_proxy": "C:\\Program Files\\Google\\Chrome\\Application\\chrome_proxy.exe",
+    "profile_directory": "Default",
+    "app_id": "kbahegaieeiffioknkhijpciaobfjffo"
+  },
+  "automation": {
+    "maximize_window": true,
+    "messages_click_x": 101,
+    "messages_click_y": 570,
+    "messages_after_click_wait_seconds": 2,
+    "after_messages_wait_seconds": 15,
+    "second_click_x": 404,
+    "second_click_y": 75,
+    "second_click_wait_seconds": 2,
+    "scroll_wait_seconds": 1.2,
+    "after_nickname_click_wait_seconds": 1.0,
+    "after_send_wait_seconds": 1.0,
+    "between_standard_scans_wait_seconds": 0.8,
+    "tesseract_cmd": "",
+    "ocr_lang": "rus+eng",
+    "ocr_psm": 11,
+    "ocr_scale": 3,
+    "min_ocr_confidence": 25,
+    "fuzzy_threshold": 0.84,
+    "pyautogui_pause": 0.15,
+    "scroll_steps": -50,
+    "message_input_x": 620,
+    "message_input_y": 1047,
+    "before_manual_typing_wait_seconds": 2.0,
+    "manual_key_interval_seconds": 0.08
+  },
+  "messaging": {
+    "message": "Огонь"
+  }
+}
