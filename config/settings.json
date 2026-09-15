@@ -6,6 +6,7 @@
   },
   "automation": {
     "maximize_window": true,
+    "startup_topmost_seconds": 10,
     "messages_click_x": 101,
     "messages_click_y": 570,
     "messages_after_click_wait_seconds": 2,

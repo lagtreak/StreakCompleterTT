@@ -69,6 +69,9 @@ class ChromeTikTokApp:
         self.process = subprocess.Popen(command, close_fds=True)
         self.wait_for_window(timeout=30)
         self.ensure_maximized()
+        startup_hold = float(self.automation.get("startup_topmost_seconds", 10.0))
+        if startup_hold > 0:
+            self.hold_topmost_and_foreground(startup_hold)
 
     def wait_for_window(self, timeout: float = 30) -> Any:
         deadline = time.time() + timeout
@@ -134,6 +137,59 @@ class ChromeTikTokApp:
     def bring_to_front(self) -> None:
         window = self.refresh_window()
         self._force_maximize_and_activate(window)
+
+    def hold_topmost_and_foreground(self, seconds: float) -> None:
+        """Keep the TikTok window topmost and foreground for a short startup period."""
+        seconds = max(0.0, float(seconds))
+        deadline = time.monotonic() + seconds
+        user32 = ctypes.windll.user32
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+        SWP_NOSIZE = 0x0001
+        SWP_NOMOVE = 0x0002
+        SWP_SHOWWINDOW = 0x0040
+
+        self.logger.info(
+            "Holding TikTok topmost + foreground for %.1f seconds after launch.", seconds
+        )
+
+        while time.monotonic() < deadline:
+            try:
+                window = self.refresh_window(timeout=1.0)
+                handle = getattr(window, "handle", 0)
+                if handle:
+                    # TOPMOST keeps TikTok above Explorer and other ordinary windows.
+                    user32.SetWindowPos(
+                        wintypes.HWND(handle),
+                        wintypes.HWND(HWND_TOPMOST),
+                        0, 0, 0, 0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                    )
+                    user32.ShowWindow(handle, 3)  # SW_MAXIMIZE
+                    user32.BringWindowToTop(handle)
+                    user32.SetForegroundWindow(handle)
+                    self.window = window
+            except Exception as exc:
+                self.logger.warning("Could not keep TikTok topmost/foreground: %s", exc)
+            time.sleep(0.5)
+
+        # Remove the persistent TOPMOST flag after the startup hold. The window stays
+        # foreground, but normal z-order is restored so the rest of the desktop behaves normally.
+        try:
+            window = self.refresh_window(timeout=1.0)
+            handle = getattr(window, "handle", 0)
+            if handle:
+                user32.SetWindowPos(
+                    wintypes.HWND(handle),
+                    wintypes.HWND(HWND_NOTOPMOST),
+                    0, 0, 0, 0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                )
+                user32.BringWindowToTop(handle)
+                user32.SetForegroundWindow(handle)
+                self.logger.info("Startup topmost hold finished; TikTok remains foregrounded (handle=%s).", handle)
+        except Exception as exc:
+            self.logger.warning("Could not clear TikTok topmost state: %s", exc)
 
     def _force_maximize_and_activate(self, window: Any) -> None:
         """Maximize without restoring to a windowed state, then foreground it."""
