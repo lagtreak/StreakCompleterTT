@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.controller import ApplicationController
 from utils.logger import logger
+from utils.keyboard import force_english_layout
 
 
 def load_settings() -> dict:
@@ -31,19 +32,23 @@ def run_workflow() -> int:
     workflow = settings.get("workflow", {})
     controller = ApplicationController()
 
-    launch_to_messages = float(workflow.get("launch_to_messages_wait_seconds", 60))
     messages_to_ocr = float(workflow.get("messages_to_ocr_wait_seconds", 20))
     ocr_to_close = float(workflow.get("ocr_to_close_wait_seconds", 10))
 
     try:
         logger.info("========== TikTok Messenger automated workflow START ==========")
 
+        logger.info("Stage 0/4: Force English keyboard layout")
+        try:
+            changed = force_english_layout()
+            logger.info("English keyboard layout requested before TikTok launch: %s", changed)
+        except Exception as exc:
+            logger.warning("Could not force English keyboard layout before launch: %s", exc)
+
         logger.info("Stage 1/4: Launch TikTok App")
         controller.launch_tiktok()
 
-        wait_with_progress(launch_to_messages, "between Stage 1 and Stage 2")
-
-        logger.info("Stage 2/4: Open Messages")
+        logger.info("Stage 2/4: Wait for and Open Messages")
         controller.open_messages()
 
         wait_with_progress(messages_to_ocr, "between Stage 2 and Stage 3")

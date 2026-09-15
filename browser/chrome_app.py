@@ -197,7 +197,7 @@ class ChromeTikTokApp:
         pyautogui.click(point[0], point[1], duration=0.08)
 
     def click_messages(self, ocr=None) -> None:
-        self.logger.info("Opening Messages: locating the 'Сообщения' label in the left third of the screen.")
+        self.logger.info("Opening Messages: continuously locating the 'Сообщения' label in the left third of the screen.")
         self.ensure_maximized()
         self.refresh_window()
 
@@ -205,18 +205,28 @@ class ChromeTikTokApp:
             raise ValueError("OCR engine is required to locate the 'Сообщения' label.")
 
         target = str(self.automation.get("messages_label", "Сообщения"))
-        timeout = float(self.automation.get("messages_ocr_timeout_seconds", 20))
+        timeout = float(self.automation.get("messages_ocr_timeout_seconds", 300))
         poll = float(self.automation.get("messages_ocr_poll_seconds", 1.0))
+        after_found_wait = float(self.automation.get("messages_label_found_wait_seconds", 2.0))
         deadline = time.time() + timeout
         found = None
 
         while time.time() < deadline:
             self.ensure_maximized()
-            matches = ocr.find_text_matches([target], region_ratio=float(self.automation.get("messages_left_region_ratio", 1/3)))
+            matches = ocr.find_text_matches(
+                [target],
+                region_ratio=float(self.automation.get("messages_left_region_ratio", 1/3)),
+            )
             if matches:
                 found = matches[0]
+                self.logger.info(
+                    "Found '%s' at OCR box (%s,%s,%s,%s), center=(%s,%s), score=%.2f. Waiting %.1fs before click.",
+                    target, found.x, found.y, found.width, found.height,
+                    found.center[0], found.center[1], found.score, after_found_wait,
+                )
+                time.sleep(after_found_wait)
                 break
-            self.logger.info("'Сообщения' not found yet; retrying OCR in %.1fs.", poll)
+            self.logger.info("'%s' not found yet; retrying OCR in %.1fs.", target, poll)
             time.sleep(poll)
 
         if found is None:
@@ -224,11 +234,12 @@ class ChromeTikTokApp:
             raise TimeoutError(f"Could not locate '{target}' in the left third of the screen within {timeout:.1f}s.")
 
         x, y = found.center
-        self.logger.info(
-            "Found '%s' at OCR box (%s,%s,%s,%s), center=(%s,%s), score=%.2f. Clicking label.",
-            target, found.x, found.y, found.width, found.height, x, y, found.score,
-        )
         self.bring_to_front()
+        # Refresh OCR coordinates after the wait/activation so we click where the
+        # label was actually detected on the current fullscreen layout.
+        self.logger.info(
+            "Clicking '%s' at OCR center=(%s,%s).", target, x, y,
+        )
         pyautogui.click(x, y, duration=0.10)
         time.sleep(float(self.automation.get("messages_after_click_wait_seconds", 2)))
         self.refresh_window()

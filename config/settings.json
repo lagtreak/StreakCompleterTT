@@ -27,16 +27,17 @@
     "scroll_steps": -50,
     "messages_label": "Сообщения",
     "messages_left_region_ratio": 0.3333333333,
-    "messages_ocr_timeout_seconds": 20,
+    "messages_ocr_timeout_seconds": 300,
     "messages_ocr_poll_seconds": 1.0,
     "messages_ocr_min_confidence": 15,
-    "messages_ocr_fuzzy_threshold": 0.72
+    "messages_ocr_fuzzy_threshold": 0.72,
+    "messages_label_found_wait_seconds": 2.0
   },
   "messaging": {
     "message": "Огонь"
   },
   "workflow": {
-    "launch_to_messages_wait_seconds": 30,
+    "launch_to_messages_wait_seconds": 0,
     "messages_to_ocr_wait_seconds": 10,
     "ocr_to_close_wait_seconds": 10
   }
