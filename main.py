@@ -6,7 +6,6 @@ from pathlib import Path
 
 from app.controller import ApplicationController
 from utils.logger import logger
-from utils.keyboard import force_english_layout
 
 
 def load_settings() -> dict:
@@ -37,13 +36,6 @@ def run_workflow() -> int:
 
     try:
         logger.info("========== TikTok Messenger automated workflow START ==========")
-
-        logger.info("Stage 0/4: Force English keyboard layout")
-        try:
-            changed = force_english_layout()
-            logger.info("English keyboard layout requested before TikTok launch: %s", changed)
-        except Exception as exc:
-            logger.warning("Could not force English keyboard layout before launch: %s", exc)
 
         logger.info("Stage 1/4: Launch TikTok App")
         controller.launch_tiktok()
