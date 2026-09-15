@@ -28,5 +28,10 @@
   },
   "messaging": {
     "message": "Огонь"
+  },
+  "workflow": {
+    "launch_to_messages_wait_seconds": 30,
+    "messages_to_ocr_wait_seconds": 10,
+    "ocr_to_close_wait_seconds": 10
   }
 }

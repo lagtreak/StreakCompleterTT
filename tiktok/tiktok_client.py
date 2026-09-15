@@ -40,15 +40,24 @@ class TikTokClient:
             "Clicking @%s at OCR box (%s,%s,%s,%s), center=(%s,%s), score=%.2f",
             match.username, match.x, match.y, match.width, match.height, x, y, match.score,
         )
+        self.app.bring_to_front()
         pyautogui.click(x, y, duration=0.10)
-        time.sleep(float(self.settings.get("after_nickname_click_wait_seconds", 1.0)))
+        wait = float(self.settings.get("after_nickname_click_wait_seconds", 1.0))
+        time.sleep(wait)
+        # Re-activate the same TikTok top-level window after the chat opens so
+        # Ctrl+A / Ctrl+V are delivered to TikTok rather than another window.
+        self.app.bring_to_front()
+        self.logger.info("TikTok window re-activated after opening @%s; waiting %.2fs before paste.", match.username, wait)
 
     def _send_message(self, message: str, username: str) -> None:
         if not message.strip():
             raise MessageSendError("Message is empty.")
 
-        # The chat pane should now be focused. Clicking the center-right/lower area
-        # is intentionally avoided; keyboard focus is kept on the chat opened by the nickname click.
+        # Preserve the Stage 13 send mechanism: clipboard -> Ctrl+A -> Ctrl+V -> Enter.
+        # Explicitly bring the TikTok app to the foreground immediately before the
+        # keyboard sequence so another window cannot receive the keystrokes.
+        self.app.bring_to_front()
+        self.logger.info("Sending to @%s: activating TikTok, then Ctrl+A/Ctrl+V/Enter.", username)
         self._paste(message)
         pyautogui.press("enter")
         time.sleep(float(self.settings.get("after_send_wait_seconds", 1.0)))

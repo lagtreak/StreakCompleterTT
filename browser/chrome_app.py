@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import re
 import subprocess
 import time
@@ -19,7 +20,7 @@ class ChromeTikTokApp:
     BASE_WIDTH = 1920
     BASE_HEIGHT = 1080
 
-    # Based on the user's fullscreen screenshot. Previous Y was ~490; user requested +80px.
+    # Full-screen coordinates calibrated from the user's 1920x1080 screenshot.
     MESSAGES_X = 101
     MESSAGES_Y = 570
 
@@ -80,57 +81,103 @@ class ChromeTikTokApp:
         raise TimeoutError("TikTok app window was not found after launch.")
 
     def _find_window(self) -> Optional[Any]:
+        """Find the current visible TikTok top-level window.
+
+        The Chrome app can recreate its top-level HWND during navigation. Therefore
+        callers should refresh this reference before critical UI actions instead of
+        treating the initial HWND as permanent.
+        """
         desktop = Desktop(backend="uia")
         windows = desktop.windows(visible_only=True)
-        matching = []
+
+        foreground = None
+        try:
+            foreground_handle = ctypes.windll.user32.GetForegroundWindow()
+        except Exception:
+            foreground_handle = 0
+
+        matching: list[Any] = []
         for window in windows:
             try:
                 title = window.window_text() or ""
-                if self.TITLE_RE.match(title):
-                    matching.append(window)
+                if not self.TITLE_RE.match(title):
+                    continue
+                matching.append(window)
+                if getattr(window, "handle", 0) == foreground_handle:
+                    foreground = window
             except Exception:
                 continue
-        if not matching:
-            return None
-        return matching[0]
+
+        if foreground is not None:
+            return foreground
+        return matching[0] if matching else None
+
+    def refresh_window(self, timeout: float = 5) -> Any:
+        """Refresh the current HWND and return a live TikTok window object."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            window = self._find_window()
+            if window is not None:
+                old_handle = getattr(self.window, "handle", None) if self.window is not None else None
+                new_handle = getattr(window, "handle", None)
+                if old_handle != new_handle:
+                    self.logger.info("TikTok window handle refreshed: %s -> %s", old_handle, new_handle)
+                self.window = window
+                return window
+            time.sleep(0.25)
+        raise TimeoutError("Current TikTok app window was not found.")
 
     def _get_window(self) -> Any:
-        if self.window is not None:
-            try:
-                if self.window.exists(timeout=0.5):
-                    return self.window
-            except Exception:
-                pass
-        return self.wait_for_window()
+        # Always refresh before a critical action because the Chrome app may change HWND.
+        return self.refresh_window(timeout=5)
 
     def bring_to_front(self) -> None:
-        window = self._get_window()
+        window = self.refresh_window()
+        self._force_maximize_and_activate(window)
+
+    def _force_maximize_and_activate(self, window: Any) -> None:
+        """Maximize without restoring to a windowed state, then foreground it."""
+        handle = getattr(window, "handle", None)
+        if not handle:
+            try:
+                window.maximize()
+                window.set_focus()
+            except Exception as exc:
+                self.logger.warning("Could not focus/maximize TikTok window: %s", exc)
+            return
+
+        user32 = ctypes.windll.user32
+        SW_RESTORE = 9
+        SW_MAXIMIZE = 3
+
         try:
-            window.set_focus()
-        except Exception:
-            pass
-        try:
-            window.maximize()
-            time.sleep(0.8)
+            # If minimized, restore first. Never call SW_RESTORE on an ordinary
+            # maximized window because it would intentionally unmaximize it.
+            if user32.IsIconic(handle):
+                user32.ShowWindow(handle, SW_RESTORE)
+                time.sleep(0.2)
+
+            user32.ShowWindow(handle, SW_MAXIMIZE)
+            user32.BringWindowToTop(handle)
+            user32.SetForegroundWindow(handle)
+            time.sleep(0.25)
+
+            # A second maximize call is idempotent and protects against a window
+            # recreation during activation.
+            user32.ShowWindow(handle, SW_MAXIMIZE)
+            self.logger.info("TikTok window maximized and foregrounded via WinAPI (handle=%s).", handle)
         except Exception as exc:
-            self.logger.warning("Could not maximize TikTok window through UIA: %s", exc)
-        try:
-            window.set_focus()
-        except Exception:
-            pass
+            self.logger.warning("WinAPI maximize/foreground failed: %s", exc)
+            try:
+                window.maximize()
+                window.set_focus()
+            except Exception:
+                pass
 
     def ensure_maximized(self) -> None:
-        window = self._get_window()
-        try:
-            window.maximize()
-        except Exception:
-            pass
-        time.sleep(0.8)
-        try:
-            window.set_focus()
-        except Exception:
-            pass
-        self.logger.info("TikTok window is maximized before automation.")
+        window = self.refresh_window()
+        self._force_maximize_and_activate(window)
+        self.logger.info("TikTok window is forced to maximized state before automation (handle=%s).", getattr(window, "handle", None))
 
     def _scaled_screen_point(self, base_x: int, base_y: int) -> tuple[int, int]:
         screen_w, screen_h = pyautogui.size()
@@ -140,47 +187,56 @@ class ChromeTikTokApp:
 
     def click_screen_point(self, x: int, y: int, label: str = "screen point") -> None:
         self.ensure_maximized()
+        self.refresh_window()
         point = self._scaled_screen_point(x, y)
+        screen_w, screen_h = pyautogui.size()
         self.logger.info(
-            "Clicking %s at base=(%s,%s), screen=(%s,%s), screen_size=%sx%s",
-            label, x, y, point[0], point[1], *pyautogui.size()
+            "Clicking %s at base=(%s,%s), screen=(%s,%s), screen_size=%sx%s, hwnd=%s",
+            label, x, y, point[0], point[1], screen_w, screen_h, getattr(self.window, "handle", None)
         )
         pyautogui.click(point[0], point[1], duration=0.08)
 
     def click_messages(self) -> None:
-        self.bring_to_front()
+        self.logger.info("Opening Messages")
         self.ensure_maximized()
+        # Refresh after the maximize/focus operation so we don't rely on a stale HWND.
+        self.refresh_window()
         x = int(self.automation.get("messages_click_x", self.MESSAGES_X))
         y = int(self.automation.get("messages_click_y", self.MESSAGES_Y))
         self.click_screen_point(x, y, "Messages")
         time.sleep(float(self.automation.get("messages_after_click_wait_seconds", 2)))
+        self.refresh_window()
         self.save_screenshot("messages_after_click")
 
     def prepare_messaging_view(self) -> None:
-        wait_seconds = float(self.automation.get("after_messages_wait_seconds", 5))
+        wait_seconds = float(self.automation.get("after_messages_wait_seconds", 15))
         self.logger.info("Waiting %.1fs after opening Messages before second navigation click.", wait_seconds)
         time.sleep(wait_seconds)
 
+        self.ensure_maximized()
+        self.refresh_window()
         click_x = int(self.automation.get("second_click_x", 404))
         click_y = int(self.automation.get("second_click_y", 75))
         self.click_screen_point(click_x, click_y, "post-Messages view selector")
         time.sleep(float(self.automation.get("second_click_wait_seconds", 2)))
         self.ensure_maximized()
+        self.refresh_window()
         self.save_screenshot("messaging_view_ready")
 
-    def scroll_at(self, x: int, y: int, clicks: int = -1) -> None:
+    def scroll_at(self, x: int, y: int, clicks: int = -50) -> None:
         self.ensure_maximized()
         point = self._scaled_screen_point(x, y)
         self.logger.info("Moving to completed nickname at (%s,%s) and scrolling %s notch.", point[0], point[1], clicks)
         pyautogui.moveTo(point[0], point[1], duration=0.12)
         pyautogui.scroll(clicks)
         time.sleep(float(self.automation.get("scroll_wait_seconds", 1.2)))
+        self.refresh_window()
         self.save_screenshot("after_scroll")
 
     def close(self) -> None:
         window = None
         try:
-            window = self._get_window()
+            window = self.refresh_window(timeout=2)
         except Exception:
             pass
 
