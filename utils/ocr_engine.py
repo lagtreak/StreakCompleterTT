@@ -90,6 +90,75 @@ class ScreenOCR:
         gray = gray.filter(ImageFilter.SHARPEN)
         return gray.resize((gray.width * scale, gray.height * scale))
 
+    def find_text_matches(self, texts: Iterable[str], region_ratio: float = 1/3) -> list[OCRMatch]:
+        """Find arbitrary target texts in the left part of the screen."""
+        self.validate()
+        targets = list(texts)
+        normalized_targets = {self._normalize(name): name for name in targets}
+
+        screen_w, screen_h = pyautogui.size()
+        crop_w = max(1, int(screen_w * region_ratio))
+        screenshot = pyautogui.screenshot()
+        crop = screenshot.crop((0, 0, crop_w, screen_h))
+        processed = self._preprocess(crop)
+
+        output_dir = Path(__file__).resolve().parent.parent / "screenshots"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        processed.save(output_dir / "ocr_left_third_messages.png")
+
+        lang = str(self.settings.get("ocr_lang", "rus+eng"))
+        psm = int(self.settings.get("messages_ocr_psm", self.settings.get("ocr_psm", 11)))
+        config = f"--oem 3 --psm {psm}"
+        data = pytesseract.image_to_data(processed, lang=lang, config=config, output_type=Output.DICT)
+        scale = int(self.settings.get("ocr_scale", 3))
+        threshold = float(self.settings.get("messages_ocr_fuzzy_threshold", 0.72))
+        matches: list[OCRMatch] = []
+        seen: set[tuple[str, int, int]] = set()
+
+        for i, raw in enumerate(data["text"]):
+            text = (raw or "").strip()
+            if not text:
+                continue
+            try:
+                conf = float(data["conf"][i])
+            except (TypeError, ValueError):
+                conf = -1
+            if conf < float(self.settings.get("messages_ocr_min_confidence", 15)):
+                continue
+
+            norm = self._normalize(text)
+            if not norm:
+                continue
+
+            best_user = None
+            best_score = 0.0
+            for target_norm, target_original in normalized_targets.items():
+                score = 1.0 if norm == target_norm else difflib.SequenceMatcher(None, norm, target_norm).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_user = target_original
+
+            if best_user is None or best_score < threshold:
+                continue
+
+            left = int(data["left"][i]) // scale
+            top = int(data["top"][i]) // scale
+            width = max(1, int(data["width"][i]) // scale)
+            height = max(1, int(data["height"][i]) // scale)
+            key = (self._normalize(best_user), left, top)
+            if key in seen:
+                continue
+            seen.add(key)
+            matches.append(OCRMatch(best_user, best_score, left, top, width, height, text))
+
+        matches.sort(key=lambda m: (m.y, m.x))
+        self.logger.info(
+            "Messages OCR left-third scan: %d matches found: %s",
+            len(matches),
+            [f"{m.username}@y={m.y}/score={m.score:.2f}/raw={m.raw_text!r}" for m in matches],
+        )
+        return matches
+
     def capture_left_half(self) -> tuple[Image.Image, int, int]:
         screen_w, screen_h = pyautogui.size()
         crop_w = screen_w // 2

@@ -196,17 +196,43 @@ class ChromeTikTokApp:
         )
         pyautogui.click(point[0], point[1], duration=0.08)
 
-    def click_messages(self) -> None:
-        self.logger.info("Opening Messages")
+    def click_messages(self, ocr=None) -> None:
+        self.logger.info("Opening Messages: locating the 'Сообщения' label in the left third of the screen.")
         self.ensure_maximized()
-        # Refresh after the maximize/focus operation so we don't rely on a stale HWND.
         self.refresh_window()
-        x = int(self.automation.get("messages_click_x", self.MESSAGES_X))
-        y = int(self.automation.get("messages_click_y", self.MESSAGES_Y))
-        self.click_screen_point(x, y, "Messages")
+
+        if ocr is None:
+            raise ValueError("OCR engine is required to locate the 'Сообщения' label.")
+
+        target = str(self.automation.get("messages_label", "Сообщения"))
+        timeout = float(self.automation.get("messages_ocr_timeout_seconds", 20))
+        poll = float(self.automation.get("messages_ocr_poll_seconds", 1.0))
+        deadline = time.time() + timeout
+        found = None
+
+        while time.time() < deadline:
+            self.ensure_maximized()
+            matches = ocr.find_text_matches([target], region_ratio=float(self.automation.get("messages_left_region_ratio", 1/3)))
+            if matches:
+                found = matches[0]
+                break
+            self.logger.info("'Сообщения' not found yet; retrying OCR in %.1fs.", poll)
+            time.sleep(poll)
+
+        if found is None:
+            self.save_screenshot("messages_label_not_found")
+            raise TimeoutError(f"Could not locate '{target}' in the left third of the screen within {timeout:.1f}s.")
+
+        x, y = found.center
+        self.logger.info(
+            "Found '%s' at OCR box (%s,%s,%s,%s), center=(%s,%s), score=%.2f. Clicking label.",
+            target, found.x, found.y, found.width, found.height, x, y, found.score,
+        )
+        self.bring_to_front()
+        pyautogui.click(x, y, duration=0.10)
         time.sleep(float(self.automation.get("messages_after_click_wait_seconds", 2)))
         self.refresh_window()
-        self.save_screenshot("messages_after_click")
+        self.save_screenshot("messages_after_ocr_click")
 
     def prepare_messaging_view(self) -> None:
         wait_seconds = float(self.automation.get("after_messages_wait_seconds", 15))

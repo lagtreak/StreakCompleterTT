@@ -26,7 +26,7 @@ class TikTokClient:
 
     def open_messages(self) -> None:
         self.logger.info("Opening Messages")
-        self.app.click_messages()
+        self.app.click_messages(self.ocr)
         self.app.prepare_messaging_view()
 
     def _paste(self, text: str) -> None:
