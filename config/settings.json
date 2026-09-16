@@ -9,11 +9,11 @@
     "startup_topmost_seconds": 10,
     "messages_click_x": 101,
     "messages_click_y": 570,
-    "messages_after_click_wait_seconds": 2,
-    "after_messages_wait_seconds": 15,
+    "messages_after_click_wait_seconds": 1,
+    "after_messages_wait_seconds": 25,
     "second_click_x": 404,
     "second_click_y": 75,
-    "second_click_wait_seconds": 2,
+    "second_click_wait_seconds": 1,
     "scroll_wait_seconds": 1.2,
     "after_nickname_click_wait_seconds": 1.0,
     "after_send_wait_seconds": 1.0,
@@ -39,7 +39,7 @@
   },
   "workflow": {
     "launch_to_messages_wait_seconds": 0,
-    "messages_to_ocr_wait_seconds": 10,
+    "messages_to_ocr_wait_seconds": 5,
     "ocr_to_close_wait_seconds": 10
   }
 }
