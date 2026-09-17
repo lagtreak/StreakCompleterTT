@@ -27,7 +27,14 @@ class TikTokClient:
     def open_messages(self) -> None:
         self.logger.info("Opening Messages")
         self.app.click_messages(self.ocr)
-        self.app.prepare_messaging_view()
+        self.app.prepare_messaging_view(self.ocr)
+        initial_wait = float(self.settings.get("initial_nickname_search_wait_seconds", 10.0))
+        if initial_wait > 0:
+            self.logger.info(
+                "Expanded chat view is ready. Waiting %.1f seconds before starting the first nickname search.",
+                initial_wait,
+            )
+            time.sleep(initial_wait)
 
     def _paste(self, text: str) -> None:
         pyperclip.copy(text)
@@ -49,19 +56,100 @@ class TikTokClient:
         self.app.bring_to_front()
         self.logger.info("TikTok window re-activated after opening @%s; waiting %.2fs before paste.", match.username, wait)
 
+    def _wait_for_message_input(self, username: str) -> None:
+        """Wait until OCR sees any text in the message-input area.
+
+        The input area is used only as a visual readiness signal. We intentionally
+        do not click it: after the chat is opened, the field is already focused in
+        the working TikTok flow, and an unnecessary coordinate click can race with
+        the page update and leave focus on the page instead of the input.
+        """
+        box_x = int(self.settings.get("message_input_ocr_x", 520))
+        box_y = int(self.settings.get("message_input_ocr_y", 1020))
+        box_w = int(self.settings.get("message_input_ocr_width", 300))
+        box_h = int(self.settings.get("message_input_ocr_height", 40))
+        timeout = float(self.settings.get("message_input_ocr_timeout_seconds", 30.0))
+        poll = float(self.settings.get("message_input_ocr_poll_seconds", 0.5))
+        min_confidence = float(self.settings.get("message_input_ocr_min_confidence", 10))
+
+        self.logger.info(
+            "Waiting for message input to become visually ready for @%s: OCR box=(%d,%d,%d,%d), timeout=%.1fs, poll=%.1fs.",
+            username, box_x, box_y, box_w, box_h, timeout, poll,
+        )
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.app.ensure_maximized()
+            matches = self.ocr.find_any_text_in_box(
+                box_x, box_y, box_w, box_h,
+                min_confidence=min_confidence,
+            )
+            if matches:
+                self.logger.info(
+                    "Message input area detected for @%s: %s. Sending Ctrl+A/Ctrl+V immediately.",
+                    username,
+                    [f"{m.raw_text!r}@({m.x},{m.y})/conf={m.score:.0f}" for m in matches],
+                )
+                return
+
+            self.logger.info(
+                "Message input area for @%s is not ready yet; retrying OCR in %.1fs.",
+                username, poll,
+            )
+            time.sleep(poll)
+
+        self.app.save_screenshot(f"message_input_not_ready_{username}")
+        raise TimeoutError(
+            f"Message input area did not show any OCR text within {timeout:.1f}s for @{username}."
+        )
+
     def _send_message(self, message: str, username: str) -> None:
         if not message.strip():
             raise MessageSendError("Message is empty.")
 
-        # Preserve the Stage 13 send mechanism: clipboard -> Ctrl+A -> Ctrl+V -> Enter.
-        # Explicitly bring the TikTok app to the foreground immediately before the
-        # keyboard sequence so another window cannot receive the keystrokes.
         self.app.bring_to_front()
-        self.logger.info("Sending to @%s: activating TikTok, then Ctrl+A/Ctrl+V/Enter.", username)
+        self._wait_for_message_input(username)
+        self.app.bring_to_front()
+        self.logger.info("Sending to @%s: Ctrl+A/Ctrl+V/Enter.", username)
         self._paste(message)
         pyautogui.press("enter")
         time.sleep(float(self.settings.get("after_send_wait_seconds", 1.0)))
         self.logger.info("Message sent to @%s", username)
+
+    def wait_for_any_target_nickname(self, users: Iterable[User]) -> None:
+        """Wait until at least one target nickname becomes visible before full OCR processing."""
+        targets = [
+            user.username.lstrip("@").strip()
+            for user in users
+            if user.enabled and user.username.strip()
+        ]
+        if not targets:
+            raise UserSearchError("No enabled usernames to search.")
+
+        timeout = float(self.settings.get("nicknames_ready_timeout_seconds", 300))
+        poll = float(self.settings.get("nicknames_ready_poll_seconds", 1.0))
+        found_wait = float(self.settings.get("nicknames_ready_found_wait_seconds", 3.0))
+        self.logger.info(
+            "Waiting for any target nickname to appear before starting full OCR: timeout=%.1fs, poll=%.1fs.",
+            timeout, poll,
+        )
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.app.ensure_maximized()
+            matches = self.ocr.find_matches(targets)
+            if matches:
+                self.logger.info(
+                    "Target nickname appeared (%s at y=%d); waiting %.1fs before Stage 3 OCR.",
+                    matches[0].username, matches[0].y, found_wait,
+                )
+                time.sleep(found_wait)
+                return
+            time.sleep(poll)
+
+        self.app.save_screenshot("nicknames_not_ready")
+        raise TimeoutError(
+            f"No target nickname appeared within {timeout:.1f}s after the Messages stage."
+        )
 
     def send_sequence(self, users: Iterable[User], message: str) -> str:
         self.app.ensure_maximized()

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+import subprocess
 
 from app.controller import ApplicationController
 from utils.logger import logger
@@ -31,8 +32,8 @@ def run_workflow() -> int:
     workflow = settings.get("workflow", {})
     controller = ApplicationController()
 
-    messages_to_ocr = float(workflow.get("messages_to_ocr_wait_seconds", 20))
     ocr_to_close = float(workflow.get("ocr_to_close_wait_seconds", 10))
+    hibernate_after_close = float(workflow.get("hibernate_after_tiktok_close_seconds", workflow.get("shutdown_after_tiktok_close_seconds", 1)))
 
     try:
         logger.info("========== TikTok Messenger automated workflow START ==========")
@@ -43,15 +44,19 @@ def run_workflow() -> int:
         logger.info("Stage 2/4: Wait for and Open Messages")
         controller.open_messages()
 
-        wait_with_progress(messages_to_ocr, "between Stage 2 and Stage 3")
-
-        logger.info("Stage 3/4: Run OCR messaging")
+        logger.info("Stage 3/4: Wait for target nicknames, then Run OCR messaging")
         controller.run_messaging()
 
         wait_with_progress(ocr_to_close, "between Stage 3 and Stage 4")
 
         logger.info("Stage 4/4: Close TikTok App")
         controller.close_tiktok()
+
+        logger.info("Waiting %.1f seconds after closing TikTok before hibernating Windows...", hibernate_after_close)
+        wait_with_progress(hibernate_after_close, "between TikTok close and Windows hibernation")
+
+        logger.info("Putting Windows into hibernation now.")
+        subprocess.Popen(["shutdown", "/h"], close_fds=True)
 
         logger.info("========== TikTok Messenger automated workflow FINISHED ==========")
         return 0

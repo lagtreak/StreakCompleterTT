@@ -65,6 +65,8 @@ class ApplicationController:
             raise RuntimeError("No enabled users found in config/users.json")
 
         message = settings.get("messaging", {}).get("message", "Огонь")
+        self._status("Waiting for target nicknames to appear...")
+        self.client.wait_for_any_target_nickname(users)
         self._status("Starting OCR messaging sequence...")
         summary = self.client.send_sequence(users, message)
         self._status(summary)

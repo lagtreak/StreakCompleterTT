@@ -159,22 +159,199 @@ class ScreenOCR:
         )
         return matches
 
-    def capture_left_half(self) -> tuple[Image.Image, int, int]:
+    def find_any_text_in_box(
+        self,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        *,
+        min_confidence: float = 10,
+    ) -> list[OCRMatch]:
+        """Return OCR tokens for any visible text inside a fixed screen rectangle."""
+        self.validate()
+
         screen_w, screen_h = pyautogui.size()
-        crop_w = screen_w // 2
+        left = max(0, min(int(x), screen_w - 1))
+        top = max(0, min(int(y), screen_h - 1))
+        right = max(left + 1, min(left + int(width), screen_w))
+        bottom = max(top + 1, min(top + int(height), screen_h))
+
         screenshot = pyautogui.screenshot()
-        return screenshot.crop((0, 0, crop_w, screen_h)), 0, 0
+        crop = screenshot.crop((left, top, right, bottom))
+        processed = self._preprocess(crop)
+
+        lang = str(self.settings.get("ocr_lang", "rus+eng"))
+        psm = int(self.settings.get("message_input_ocr_psm", self.settings.get("ocr_psm", 11)))
+        config = f"--oem 3 --psm {psm}"
+        data = pytesseract.image_to_data(processed, lang=lang, config=config, output_type=Output.DICT)
+
+        scale = int(self.settings.get("ocr_scale", 3))
+        matches: list[OCRMatch] = []
+        seen: set[tuple[int, int, str]] = set()
+
+        for i, raw in enumerate(data["text"]):
+            text = (raw or "").strip()
+            if not text:
+                continue
+
+            try:
+                conf = float(data["conf"][i])
+            except (TypeError, ValueError):
+                conf = -1
+            if conf < float(min_confidence):
+                continue
+
+            local_left = int(data["left"][i]) // scale
+            local_top = int(data["top"][i]) // scale
+            local_width = max(1, int(data["width"][i]) // scale)
+            local_height = max(1, int(data["height"][i]) // scale)
+            screen_left = left + local_left
+            screen_top = top + local_top
+            key = (screen_left, screen_top, text.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            matches.append(
+                OCRMatch(
+                    username=text,
+                    score=conf,
+                    x=screen_left,
+                    y=screen_top,
+                    width=local_width,
+                    height=local_height,
+                    raw_text=text,
+                )
+            )
+
+        matches.sort(key=lambda m: (m.y, m.x))
+        self.logger.info(
+            "OCR any-text scan (%d,%d,%d,%d): %d text tokens found: %s",
+            left, top, right-left, bottom-top, len(matches),
+            [f"{m.raw_text!r}@({m.x},{m.y})/conf={m.score:.0f}" for m in matches],
+        )
+        return matches
+
+    def find_text_matches_in_box(
+        self,
+        texts: Iterable[str],
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        *,
+        min_confidence: float | None = None,
+        fuzzy_threshold: float | None = None,
+    ) -> list[OCRMatch]:
+        """Find target texts in a fixed screen rectangle and return screen coordinates."""
+        self.validate()
+        targets = list(texts)
+        normalized_targets = {self._normalize(name): name for name in targets}
+
+        screen_w, screen_h = pyautogui.size()
+        left = max(0, min(int(x), screen_w - 1))
+        top = max(0, min(int(y), screen_h - 1))
+        right = max(left + 1, min(left + int(width), screen_w))
+        bottom = max(top + 1, min(top + int(height), screen_h))
+
+        screenshot = pyautogui.screenshot()
+        crop = screenshot.crop((left, top, right, bottom))
+        processed = self._preprocess(crop)
+
+        lang = str(self.settings.get("ocr_lang", "rus+eng"))
+        psm = int(self.settings.get("messages_ocr_psm", self.settings.get("ocr_psm", 11)))
+        config = f"--oem 3 --psm {psm}"
+        data = pytesseract.image_to_data(processed, lang=lang, config=config, output_type=Output.DICT)
+        scale = int(self.settings.get("ocr_scale", 3))
+        confidence_limit = float(
+            self.settings.get("messages_ocr_min_confidence", 15)
+            if min_confidence is None else min_confidence
+        )
+        threshold = float(
+            self.settings.get("messages_ocr_fuzzy_threshold", 0.72)
+            if fuzzy_threshold is None else fuzzy_threshold
+        )
+
+        matches: list[OCRMatch] = []
+        seen: set[tuple[str, int, int]] = set()
+        for i, raw in enumerate(data["text"]):
+            text = (raw or "").strip()
+            if not text:
+                continue
+            try:
+                conf = float(data["conf"][i])
+            except (TypeError, ValueError):
+                conf = -1
+            if conf < confidence_limit:
+                continue
+
+            norm = self._normalize(text)
+            if not norm:
+                continue
+
+            best_user = None
+            best_score = 0.0
+            for target_norm, target_original in normalized_targets.items():
+                score = 1.0 if norm == target_norm else difflib.SequenceMatcher(None, norm, target_norm).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_user = target_original
+
+            if best_user is None or best_score < threshold:
+                continue
+
+            local_left = int(data["left"][i]) // scale
+            local_top = int(data["top"][i]) // scale
+            local_width = max(1, int(data["width"][i]) // scale)
+            local_height = max(1, int(data["height"][i]) // scale)
+            screen_left = left + local_left
+            screen_top = top + local_top
+            key = (self._normalize(best_user), screen_left, screen_top)
+            if key in seen:
+                continue
+            seen.add(key)
+            matches.append(
+                OCRMatch(
+                    best_user, best_score, screen_left, screen_top,
+                    local_width, local_height, text
+                )
+            )
+
+        matches.sort(key=lambda m: (m.y, m.x))
+        self.logger.info(
+            "OCR fixed-box scan (%d,%d,%d,%d): %d matches found: %s",
+            left, top, right-left, bottom-top, len(matches),
+            [f"{m.username}@({m.x},{m.y})/score={m.score:.2f}/raw={m.raw_text!r}" for m in matches],
+        )
+        return matches
+
+    def capture_nickname_area(self) -> tuple[Image.Image, int, int]:
+        """Capture the configured nickname-search area and return its screen offset."""
+        screen_w, screen_h = pyautogui.size()
+        left = max(0, min(int(self.settings.get("nickname_region_x", 90)), screen_w - 1))
+        top = max(0, min(int(self.settings.get("nickname_region_y", 100)), screen_h - 1))
+        width = max(1, int(self.settings.get("nickname_region_width", 400)))
+        height = max(1, int(self.settings.get("nickname_region_height", 980)))
+        right = min(left + width, screen_w)
+        bottom = min(top + height, screen_h)
+        screenshot = pyautogui.screenshot()
+        return screenshot.crop((left, top, right, bottom)), left, top
 
     def find_matches(self, usernames: Iterable[str]) -> list[OCRMatch]:
+        """Find target nicknames inside the configured fixed screen rectangle.
+
+        Matches are sorted primarily by screen Y, so the highest visible nickname
+        is always selected first, preserving the existing priority rule.
+        """
         self.validate()
         targets = list(usernames)
         normalized_targets = {self._normalize(name): name for name in targets}
-        screenshot, offset_x, offset_y = self.capture_left_half()
+        screenshot, offset_x, offset_y = self.capture_nickname_area()
         processed = self._preprocess(screenshot)
 
         output_dir = Path(__file__).resolve().parent.parent / "screenshots"
         output_dir.mkdir(parents=True, exist_ok=True)
-        processed.save(output_dir / "ocr_left_half_processed.png")
+        processed.save(output_dir / "ocr_nickname_area_processed.png")
 
         lang = str(self.settings.get("ocr_lang", "rus+eng"))
         psm = int(self.settings.get("ocr_psm", 11))
@@ -189,9 +366,8 @@ class ScreenOCR:
             text = (raw or "").strip()
             if not text:
                 continue
-            conf_raw = data["conf"][i]
             try:
-                conf = float(conf_raw)
+                conf = float(data["conf"][i])
             except (TypeError, ValueError):
                 conf = -1
             if conf < float(self.settings.get("min_ocr_confidence", 25)):
@@ -204,10 +380,7 @@ class ScreenOCR:
             best_user = None
             best_score = 0.0
             for target_norm, target_original in normalized_targets.items():
-                if norm == target_norm:
-                    score = 1.0
-                else:
-                    score = difflib.SequenceMatcher(None, norm, target_norm).ratio()
+                score = 1.0 if norm == target_norm else difflib.SequenceMatcher(None, norm, target_norm).ratio()
                 if score > best_score:
                     best_score = score
                     best_user = target_original
@@ -216,7 +389,6 @@ class ScreenOCR:
                 continue
 
             threshold = float(self.settings.get("fuzzy_threshold", 0.84))
-            # Be stricter for very short names / numbers to avoid false positives.
             if len(self._normalize(best_user)) <= 3:
                 threshold = max(threshold, 0.92)
             if best_score < threshold:
@@ -234,8 +406,9 @@ class ScreenOCR:
 
         matches.sort(key=lambda m: (m.y, m.x))
         self.logger.info(
-            "OCR left-half scan: %d target matches found: %s",
-            len(matches),
-            [f"@{m.username}@y={m.y}/score={m.score:.2f}" for m in matches],
+            "OCR nickname-area scan (%d,%d,%d,%d): %d target matches found: %s",
+            offset_x, offset_y, screenshot.width, screenshot.height, len(matches),
+            [f"@{m.username}@y={m.y}/score={m.score:.2f}/raw={m.raw_text!r}" for m in matches],
         )
         return matches
+

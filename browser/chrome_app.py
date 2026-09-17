@@ -301,16 +301,56 @@ class ChromeTikTokApp:
         self.refresh_window()
         self.save_screenshot("messages_after_ocr_click")
 
-    def prepare_messaging_view(self) -> None:
-        wait_seconds = float(self.automation.get("after_messages_wait_seconds", 15))
-        self.logger.info("Waiting %.1fs after opening Messages before second navigation click.", wait_seconds)
-        time.sleep(wait_seconds)
+    def prepare_messaging_view(self, ocr=None) -> None:
+        # Instead of relying on a fixed timer before the second navigation click,
+        # wait until the small header area visibly contains the "Сообщения" label.
+        if ocr is None:
+            raise ValueError("OCR engine is required to confirm the Messages header.")
+
+        box_x = int(self.automation.get("messages_header_x", 89))
+        box_y = int(self.automation.get("messages_header_y", 37))
+        box_w = int(self.automation.get("messages_header_width", 400))
+        box_h = int(self.automation.get("messages_header_height", 70))
+        target = str(self.automation.get("messages_header_text", "Сообщения"))
+        timeout = float(self.automation.get("messages_header_ocr_timeout_seconds", 300))
+        poll = float(self.automation.get("messages_header_ocr_poll_seconds", 1.0))
+        found_wait = float(self.automation.get("messages_header_found_wait_seconds", 1.0))
+
+        self.logger.info(
+            "Waiting for '%s' in header OCR box x=%d y=%d w=%d h=%d before second navigation click.",
+            target, box_x, box_y, box_w, box_h,
+        )
+        deadline = time.monotonic() + timeout
+        found = None
+        while time.monotonic() < deadline:
+            self.ensure_maximized()
+            matches = ocr.find_text_matches_in_box(
+                [target], box_x, box_y, box_w, box_h,
+                min_confidence=float(self.automation.get("messages_header_ocr_min_confidence", 10)),
+                fuzzy_threshold=float(self.automation.get("messages_header_ocr_fuzzy_threshold", 0.70)),
+            )
+            if matches:
+                found = matches[0]
+                self.logger.info(
+                    "Found '%s' in header box at (%d,%d); waiting %.1fs before click (404,75).",
+                    target, found.x, found.y, found_wait,
+                )
+                time.sleep(found_wait)
+                break
+            time.sleep(poll)
+
+        if found is None:
+            self.save_screenshot("messages_header_not_found")
+            raise TimeoutError(
+                f"Could not locate '{target}' in the header OCR box within {timeout:.1f}s."
+            )
 
         self.ensure_maximized()
-        self.refresh_window()
-        click_x = int(self.automation.get("second_click_x", 404))
-        click_y = int(self.automation.get("second_click_y", 75))
-        self.click_screen_point(click_x, click_y, "post-Messages view selector")
+        self.click_screen_point(
+            int(self.automation.get("second_click_x", 404)),
+            int(self.automation.get("second_click_y", 75)),
+            "post-Messages view selector",
+        )
         time.sleep(float(self.automation.get("second_click_wait_seconds", 2)))
         self.ensure_maximized()
         self.refresh_window()
