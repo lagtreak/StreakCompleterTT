@@ -9,6 +9,7 @@ from models.user import User
 from services.user_service import load_users
 from tiktok.tiktok_client import TikTokClient
 from utils.logger import logger
+from utils.run_report import RunReport
 
 
 class ApplicationController:
@@ -54,7 +55,7 @@ class ApplicationController:
         self.client.open_messages()
         self._status("Messages opened. Preparing fullscreen view...")
 
-    def run_messaging(self) -> None:
+    def run_messaging(self, report: Optional[RunReport] = None) -> None:
         self._ensure_client()
         settings = self._load_settings()
         users = [
@@ -64,11 +65,19 @@ class ApplicationController:
         if not users:
             raise RuntimeError("No enabled users found in config/users.json")
 
+        if report is not None:
+            report.set_total_users(len(users))
+
         message = settings.get("messaging", {}).get("message", "Огонь")
         self._status("Waiting for target nicknames to appear...")
         self.client.wait_for_any_target_nickname(users)
         self._status("Starting OCR messaging sequence...")
-        summary = self.client.send_sequence(users, message)
+        try:
+            summary = self.client.send_sequence(users, message)
+        finally:
+            if report is not None:
+                report.set_results(self.client.successful_users, self.client.failed_users)
+
         self._status(summary)
 
     def _ensure_client(self) -> None:

@@ -50,20 +50,13 @@
     "nickname_region_y": 100,
     "nickname_region_width": 400,
     "nickname_region_height": 980,
-    "initial_nickname_search_wait_seconds": 15.0,
+    "initial_nickname_search_wait_seconds": 10.0,
     "message_input_x": 600,
     "message_input_y": 1040,
-    "message_input_wait_after_click_seconds": 0.1,
-    "message_input_ocr_x": 520,
-    "message_input_ocr_y": 1020,
-    "message_input_ocr_width": 300,
-    "message_input_ocr_height": 40,
-    "message_input_ocr_timeout_seconds": 30.0,
-    "message_input_ocr_poll_seconds": 0.5,
-    "message_input_ocr_min_confidence": 10
+    "message_input_wait_after_click_seconds": 0.1
   },
   "messaging": {
-    "message": "Огонь"
+    "message": "🔥"
   },
   "workflow": {
     "launch_to_messages_wait_seconds": 0,
@@ -78,5 +71,13 @@
     "connection_wait_seconds": 120.0,
     "connection_poll_seconds": 2.0,
     "post_connection_wait_seconds": 5.0
+  },
+  "launcher": {
+    "startup_delay_seconds": 1.0,
+    "post_wake_wait_seconds": 8.0,
+    "wake_display_enabled": true,
+    "mouse_nudge_enabled": true,
+    "keep_system_awake": true,
+    "keep_display_awake": true
   }
 }

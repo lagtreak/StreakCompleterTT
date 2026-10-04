@@ -23,6 +23,8 @@ class TikTokClient:
         self.ocr = ScreenOCR(self.settings)
         pyautogui.PAUSE = float(self.settings.get("pyautogui_pause", 0.15))
         pyautogui.FAILSAFE = True
+        self.successful_users: list[str] = []
+        self.failed_users: list[str] = []
 
     def open_messages(self) -> None:
         self.logger.info("Opening Messages")
@@ -162,6 +164,8 @@ class TikTokClient:
         completed: set[str] = set()
         completed_count = 0
         failures: list[str] = []
+        self.successful_users = []
+        self.failed_users = []
 
         self.logger.info("Target nicknames: %s", targets)
         self.app.save_screenshot("sequence_start")
@@ -184,6 +188,7 @@ class TikTokClient:
                 self._send_message(message, chosen.username)
                 completed.add(chosen.username)
                 completed_count += 1
+                self.successful_users.append(chosen.username)
                 self.logger.info(
                     "Completed %d/%d: @%s",
                     completed_count, len(targets), chosen.username,
@@ -200,8 +205,18 @@ class TikTokClient:
 
             except Exception as exc:
                 failures.append(chosen.username)
+                self.failed_users.append(chosen.username)
                 self.logger.exception("Failed for @%s: %s", chosen.username, exc)
                 completed.add(chosen.username)
+
+        for name in failures:
+            if name.casefold() not in {failed.casefold() for failed in self.failed_users}:
+                self.failed_users.append(name)
+
+        self.logger.info(
+            "Messaging result: successful=%d, failed=%d, total=%d.",
+            len(self.successful_users), len(self.failed_users), len(targets),
+        )
 
         summary = f"Finished: {completed_count}/{len(targets)} messages sent."
         if failures:

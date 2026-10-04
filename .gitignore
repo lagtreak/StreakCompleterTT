@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 logs/*.log
 screenshots/*.png
+config/telegram.json
+config/telegram_chat_id.txt

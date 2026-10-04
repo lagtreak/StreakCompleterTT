@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "bot_token": "PASTE_YOUR_BOT_TOKEN_HERE",
+  "chat_id": "auto",
+  "request_timeout_seconds": 10.0,
+  "message_limit": 3900
+}

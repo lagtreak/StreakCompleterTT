@@ -119,3 +119,27 @@ automation.message_input_ocr_timeout_seconds
 automation.message_input_ocr_poll_seconds
 automation.message_input_ocr_min_confidence
 ```
+
+## Telegram execution reports
+
+After each workflow run, the program can send a report to a Telegram bot. The report includes:
+
+- date and start/end time;
+- total execution duration;
+- number of users who received the message;
+- number and nicknames of users who did not receive it;
+- unprocessed users when their result cannot be determined;
+- exact local times when each workflow stage started;
+- the stage and error text when the run fails.
+
+Telegram is configured in `config/telegram.json`. The project uses only Python's standard library for the Telegram Bot API, so no extra package is required.
+
+### First-time Telegram setup
+
+1. Open the configured bot in Telegram.
+2. Press **Start** or send `/start` from your private chat with the bot.
+3. Run the workflow once. With `chat_id` set to `auto`, the program finds the private chat automatically and caches the chat id in `config/telegram_chat_id.txt`.
+
+The bot token is stored in `config/telegram.json`, which is ignored by Git. Never publish that file to a public repository. For another PC, copy `config/telegram.json` together with the project, then send `/start` to the bot once on that PC if the cached chat id is not copied.
+
+To disable notifications without removing the integration, set `enabled` to `false` in `config/telegram.json`.
